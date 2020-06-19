@@ -1,0 +1,110 @@
+createOrgs
+../bin/cryptogen generate --config=./crypto-config.yaml --output="organizations"
+
+createConsortium
+../bin/configtxgen -profile TwoOrgsOrdererGenesis -channelID system-channel -outputBlock ./system-genesis-block/genesis.block
+
+
+../bin/configtxgen -profile TwoOrgsChannel -outputCreateChannelTx ./channel-artifacts/channelall.tx -channelID channelall
+
+===
+createAncorPeerTx
+../bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org1MSPanchors.tx -channelID channelall -asOrg Org1MSP
+../bin/configtxgen -profile TwoOrgsChannel -outputAnchorPeersUpdate ./channel-artifacts/Org2MSPanchors.tx -channelID channelall -asOrg Org2MSP
+
+====
+Bring up the network
+
+===
+createChannel
+
+export ORDERER_CA=/opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer channel create -o orderer.example.com:7050 -c channelall --ordererTLSHostnameOverride orderer.example.com -f ./channel-artifacts/channelall.tx --outputBlock ./channel-artifacts/channelall.block --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+==
+Org1 join the channel
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer channel join -b ./channel-artifacts/channelall.block
+
+Org2 join the channel
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" peer0.org2.example.com peer channel join -b ./channel-artifacts/channelall.block
+
+
+**********there may be a easy way for node2 to join the channel, but failed to run this on node1
+docker exec  -e "CORE_PEER_LOCALMSPID=Org2MSP" -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" -e "CORE_PEER_ADDRESS=peer0.org2.example.com"  peer0.org1.example.com peer channel join -b ./channel-artifacts/channelall.block
+
+docker exec -e "CORE_PEER_LOCALMSPID=Org2MSP" -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/organizations/peerOrganizations/org2.example.com/users/Admin@org2.example.com/msp" -e "CORE_PEER_ADDRESS=peer0.org2.example.com:7051" peer0.org1.example.com peer channel join -b ./channel-artifacts/channelall.block
+**********
+
+in case need to copy the block file
+docker cp peer0.org1.example.com:/opt/gopath/src/github.com/hyperledger/fabric/peer/channel-artifacts/channelall.block .
+
+====
+updateAnchorPeers Org1
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer channel update -o orderer.example.com:7050 --ordererTLSHostnameOverride orderer.example.com -c channelall -f ./channel-artifacts/Org1MSPanchors.tx --tls $true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+peer channel update -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com -c $CHANNEL_NAME -f ./channel-artifacts/${CORE_PEER_LOCALMSPID}anchors.tx --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA
+
+updateAnchorPeers Org2
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" peer0.org2.example.com peer channel update -o orderer.example.com:7050 --ordererTLSHostnameOverride orderer.example.com -c channelall -f ./channel-artifacts/Org2MSPanchors.tx --tls $true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+====
+install the chaincode on Org1
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer lifecycle chaincode install mycc.tar.gz
+
+install the chaincode on Org2
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" peer0.org2.example.com peer lifecycle chaincode install mycc.tar.gz
+*************had an issue: failed loading PeerOU certificate: the path is invalid in terms of linux container environment. is relatively soecified in the config.yaml file, manually change the path in config.yaml from / to \ under all Org2 folder, 4 places to change. issue resolved
+
+==
+approve the chaincode for Org1.
+
+export CC_PACKAGE_ID=mycc_1:d20cd913137f97de299fcb3ee381e3bf7c755501ba5955a323bdd8d10a5271a3
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com  peer lifecycle chaincode approveformyorg -o orderer.example.com:7050 --ordererTLSHostnameOverride orderer.example.com --channelID channelall --name mycc --version 1.0 --init-required --package-id mycc_1:d20cd913137f97de299fcb3ee381e3bf7c755501ba5955a323bdd8d10a5271a3 --sequence 1 --tls $true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+ peer lifecycle chaincode approveformyorg -o localhost:7050 --ordererTLSHostnameOverride orderer.example.com --tls $CORE_PEER_TLS_ENABLED --cafile $ORDERER_CA --channelID $CHANNEL_NAME --name mycc --version ${VERSION} --init-required --package-id ${PACKAGE_ID} --sequence ${VERSION} 
+
+approve the chaincode for Org2.
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" peer0.org2.example.com  peer lifecycle chaincode approveformyorg -o orderer.example.com:7050 --ordererTLSHostnameOverride orderer.example.com --channelID channelall --name mycc --version 1.0 --init-required --package-id mycc_1:d20cd913137f97de299fcb3ee381e3bf7c755501ba5955a323bdd8d10a5271a3 --sequence 1 --tls $true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem
+
+====
+checkCommitReadiness  for Org1.
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer lifecycle chaincode checkcommitreadiness --channelID channelall --name mycc --version 1.0 --sequence 1  --output json --init-required
+
+checkCommitReadiness  for Org2.
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org2.example.com/msp" peer0.org2.example.com peer lifecycle chaincode checkcommitreadiness --channelID channelall --name mycc --version 1.0 --sequence 1  --output json --init-required
+
+====
+commitChaincodeDefinition from Org1
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer lifecycle chaincode commit -o orderer.example.com:7050 --ordererTLSHostnameOverride orderer.example.com --channelID channelall --name mycc --version 1.0 --sequence 1 --init-required --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem --peerAddresses peer0.org1.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses peer0.org2.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt
+
+=====
+Invoking the chaincode
+
+docker exec -e "CORE_PEER_MSPCONFIGPATH=/etc/hyperledger/fabric/users/Admin@org1.example.com/msp" peer0.org1.example.com peer chaincode invoke -o orderer.example.com:7050 --isInit --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C channelall -n mycc --peerAddresses peer0.org1.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses peer0.org2.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"Args":["Init","a","100","b","100"]}' --waitForEvent
+
+=====
+query the chaincode 
+peer chaincode query -C channelall -n mycc -c '{"Args":["query","a"]}'
+the result is 100 on both Org1 and Org2
+
+====
+Invoke
+
+peer chaincode invoke -o orderer.example.com:7050 --tls true --cafile /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/ordererOrganizations/example.com/orderers/orderer.example.com/msp/tlscacerts/tlsca.example.com-cert.pem -C channelall -n mycc --peerAddresses peer0.org1.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org1.example.com/peers/peer0.org1.example.com/tls/ca.crt --peerAddresses peer0.org2.example.com:7051 --tlsRootCertFiles /opt/gopath/src/github.com/hyperledger/fabric/peer/organizations/peerOrganizations/org2.example.com/peers/peer0.org2.example.com/tls/ca.crt -c '{"Args":["invoke","a","b","10"]}' --waitForEvent
+
+===
+query again
+peer chaincode query -C channelall -n mycc -c '{"Args":["query","a"]}'
+

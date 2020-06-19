@@ -1,0 +1,7 @@
+ peer channel getinfo -c channelall get error info:
+
+Endorser and orderer connections initialized
+Error: received bad response, status 500: access denied for [GetChainInfo][channelall]: [Failed evaluating policy on signed data during check policy on channel [channelall] with policy [/Channel/Application/Readers]: [implicit policy evaluation failed - 0 sub-policies were satisfied, but this policy requires 1 of the 'Readers' sub-policies to be satisfied]]
+
+slove with: 
+export CORE_PEER_MSPCONFIGPATH=/var/hyperledger/users/Admin@org1.example.com/msp
